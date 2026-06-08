@@ -4,7 +4,6 @@ pub mod wav;
 
 use std::{
     fs::{self, File},
-    io::Read,
     path::Path,
 };
 
@@ -55,8 +54,9 @@ pub fn run(cli: Cli) -> Result<()> {
     let mut file = File::open(&config.input_file)
         .with_context(|| format!("failed to open {}", config.input_file.display()))?;
 
-    let wavfile = wav::WavFile::from_reader(&mut file);
-    println!("{:?}", wavfile);
+    let wav_file = wav::WavFile::from_reader(&mut file)?;
+    println!("{:?}", wav_file);
+
     // Apply transformations
 
     // Resolve output path

@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read};
+use std::io::{Read, Write};
 
 use anyhow::{Result, ensure};
 
@@ -8,6 +8,16 @@ const MAX_CHUNK_SIZE: u32 = 256 * 1024 * 1024; // 256 MB
 struct ChunkHeader {
     chunk_id: [u8; 4],
     chunk_size: u32,
+}
+impl ChunkHeader {
+    fn to_bytes(&self) -> [u8; 8] {
+        let mut bytes = [0u8; 8];
+
+        bytes[0..4].copy_from_slice(&self.chunk_id);
+        bytes[4..8].copy_from_slice(&self.chunk_size.to_le_bytes());
+
+        bytes
+    }
 }
 impl From<&[u8; 8]> for ChunkHeader {
     fn from(header_bytes: &[u8; 8]) -> Self {
@@ -26,32 +36,42 @@ struct RiffHeader {
     chunk_header: ChunkHeader,
     format: [u8; 4],
 }
+impl RiffHeader {
+    fn to_bytes(&self) -> [u8; 12] {
+        let mut bytes: [u8; 12] = [0; 12];
 
-#[derive(Debug)]
-pub struct FmtChunk {
-    pub chunk_header: ChunkHeader,
-    pub audio_format: u16,
-    pub num_channels: u16,
-    pub sample_rate: u32,
-    pub byte_rate: u32,
-    pub block_align: u16,
-    pub bits_per_sample: u16,
+        bytes[0..8].copy_from_slice(&self.chunk_header.to_bytes());
+        bytes[8..12].copy_from_slice(&self.format);
+
+        bytes
+    }
 }
 
 #[derive(Debug)]
-pub struct UnknownChunk {
-    pub chunk_header: ChunkHeader,
-    pub data: Vec<u8>,
+struct FmtChunk {
+    chunk_header: ChunkHeader,
+    audio_format: u16,
+    num_channels: u16,
+    sample_rate: u32,
+    byte_rate: u32,
+    block_align: u16,
+    bits_per_sample: u16,
 }
 
 #[derive(Debug)]
-pub struct DataChunk {
-    pub chunk_header: ChunkHeader,
-    pub data: Vec<u8>,
+struct UnknownChunk {
+    chunk_header: ChunkHeader,
+    data: Vec<u8>,
 }
 
 #[derive(Debug)]
-pub enum Chunk {
+struct DataChunk {
+    chunk_header: ChunkHeader,
+    data: Vec<u8>,
+}
+
+#[derive(Debug)]
+enum Chunk {
     Fmt(FmtChunk),
     Data(DataChunk),
     Unknown(UnknownChunk),
@@ -63,6 +83,51 @@ pub struct WavFile {
     chunks: Vec<Chunk>,
 }
 impl WavFile {
+    pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
+        // Write the Riff header
+        writer.write_all(&self.riff_header.to_bytes())?;
+
+        // Write the rest chunk by chunk
+        for chunk in &self.chunks {
+            match chunk {
+                Chunk::Fmt(fmt) => {
+                    writer.write_all(&fmt.chunk_header.to_bytes())?;
+
+                    writer.write_all(&fmt.audio_format.to_le_bytes())?;
+                    writer.write_all(&fmt.num_channels.to_le_bytes())?;
+                    writer.write_all(&fmt.sample_rate.to_le_bytes())?;
+                    writer.write_all(&fmt.byte_rate.to_le_bytes())?;
+                    writer.write_all(&fmt.block_align.to_le_bytes())?;
+                    writer.write_all(&fmt.bits_per_sample.to_le_bytes())?;
+
+                    if fmt.chunk_header.chunk_size % 2 != 0 {
+                        writer.write_all(&[0])?;
+                    }
+                }
+
+                Chunk::Data(data) => {
+                    writer.write_all(&data.chunk_header.to_bytes())?;
+                    writer.write_all(&data.data)?;
+
+                    if data.chunk_header.chunk_size % 2 != 0 {
+                        writer.write_all(&[0])?;
+                    }
+                }
+
+                Chunk::Unknown(chunk) => {
+                    writer.write_all(&chunk.chunk_header.to_bytes())?;
+                    writer.write_all(&chunk.data)?;
+
+                    if chunk.chunk_header.chunk_size % 2 != 0 {
+                        writer.write_all(&[0])?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self> {
         let mut riff_header_buf = [0u8; 12];
         reader.read_exact(&mut riff_header_buf)?;
@@ -140,5 +205,3 @@ impl WavFile {
         })
     }
 }
-
-// EVERYTHING IS PRIVATE
