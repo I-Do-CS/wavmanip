@@ -39,7 +39,6 @@ struct RiffHeader {
 impl RiffHeader {
     fn to_bytes(&self) -> [u8; 12] {
         let mut bytes: [u8; 12] = [0; 12];
-
         bytes[0..8].copy_from_slice(&self.chunk_header.to_bytes());
         bytes[8..12].copy_from_slice(&self.format);
 
@@ -50,12 +49,27 @@ impl RiffHeader {
 #[derive(Debug)]
 struct FmtChunk {
     chunk_header: ChunkHeader,
-    audio_format: u16,
-    num_channels: u16,
-    sample_rate: u32,
-    byte_rate: u32,
-    block_align: u16,
-    bits_per_sample: u16,
+    data: Vec<u8>,
+}
+impl FmtChunk {
+    fn audio_format(&self) -> u16 {
+        u16::from_le_bytes(self.data[0..2].try_into().unwrap())
+    }
+    fn num_channels(&self) -> u16 {
+        u16::from_le_bytes(self.data[2..4].try_into().unwrap())
+    }
+    fn sample_rate(&self) -> u32 {
+        u32::from_le_bytes(self.data[4..8].try_into().unwrap())
+    }
+    fn byte_rate(&self) -> u32 {
+        u32::from_le_bytes(self.data[8..12].try_into().unwrap())
+    }
+    fn block_align(&self) -> u16 {
+        u16::from_le_bytes(self.data[12..14].try_into().unwrap())
+    }
+    fn bits_per_sample(&self) -> u16 {
+        u16::from_le_bytes(self.data[14..16].try_into().unwrap())
+    }
 }
 
 #[derive(Debug)]
@@ -76,29 +90,68 @@ enum Chunk {
     Data(DataChunk),
     Unknown(UnknownChunk),
 }
+impl Chunk {
+    fn chunk_size(&self) -> u32 {
+        match self {
+            Chunk::Fmt(fmt) => fmt.data.len() as u32,
+            Chunk::Data(data) => data.data.len() as u32,
+            Chunk::Unknown(chunk) => chunk.data.len() as u32,
+        }
+    }
+
+    fn total_size(&self) -> u32 {
+        let payload = self.chunk_size();
+
+        8 + payload + (payload % 2)
+    }
+}
 
 #[derive(Debug)]
 pub struct WavFile {
     riff_header: RiffHeader,
     chunks: Vec<Chunk>,
+    volume_multiplier: f32,
+    reverse: bool,
 }
 impl WavFile {
+    pub fn reverse_samples(&mut self) {
+        self.reverse = true;
+    }
+
+    pub fn undo_reverse_samples(&mut self) {
+        self.reverse = false;
+    }
+
+    pub fn is_reversed(&self) -> bool {
+        self.reverse
+    }
+
+    pub fn volume_multiplier(&self) -> f32 {
+        self.volume_multiplier
+    }
+
+    pub fn adjust_volume(&mut self, multiplier: f32) {
+        self.volume_multiplier = multiplier;
+    }
+
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
+        let riff_header = RiffHeader {
+            chunk_header: ChunkHeader {
+                chunk_id: self.riff_header.chunk_header.chunk_id,
+                chunk_size: self.riff_size(),
+            },
+            format: self.riff_header.format,
+        };
+
         // Write the Riff header
-        writer.write_all(&self.riff_header.to_bytes())?;
+        writer.write_all(&riff_header.to_bytes())?;
 
         // Write the rest chunk by chunk
         for chunk in &self.chunks {
             match chunk {
                 Chunk::Fmt(fmt) => {
                     writer.write_all(&fmt.chunk_header.to_bytes())?;
-
-                    writer.write_all(&fmt.audio_format.to_le_bytes())?;
-                    writer.write_all(&fmt.num_channels.to_le_bytes())?;
-                    writer.write_all(&fmt.sample_rate.to_le_bytes())?;
-                    writer.write_all(&fmt.byte_rate.to_le_bytes())?;
-                    writer.write_all(&fmt.block_align.to_le_bytes())?;
-                    writer.write_all(&fmt.bits_per_sample.to_le_bytes())?;
+                    writer.write_all(&fmt.data)?;
 
                     if fmt.chunk_header.chunk_size % 2 != 0 {
                         writer.write_all(&[0])?;
@@ -164,23 +217,7 @@ impl WavFile {
             match &chunk_header.chunk_id {
                 b"fmt " => {
                     ensure!(data.len() >= 16, "fmt chunk too small");
-
-                    let audio_format = u16::from_le_bytes(data[0..2].try_into().unwrap());
-                    let num_channels = u16::from_le_bytes(data[2..4].try_into().unwrap());
-                    let sample_rate = u32::from_le_bytes(data[4..8].try_into().unwrap());
-                    let byte_rate = u32::from_le_bytes(data[8..12].try_into().unwrap());
-                    let block_align = u16::from_le_bytes(data[12..14].try_into().unwrap());
-                    let bits_per_sample = u16::from_le_bytes(data[14..16].try_into().unwrap());
-
-                    chunks.push(Chunk::Fmt(FmtChunk {
-                        chunk_header,
-                        audio_format,
-                        num_channels,
-                        sample_rate,
-                        byte_rate,
-                        block_align,
-                        bits_per_sample,
-                    }));
+                    chunks.push(Chunk::Fmt(FmtChunk { chunk_header, data }));
                 }
                 b"data" => chunks.push(Chunk::Data(DataChunk { chunk_header, data })),
                 _ => chunks.push(Chunk::Unknown(UnknownChunk { chunk_header, data })),
@@ -202,6 +239,12 @@ impl WavFile {
         Ok(Self {
             riff_header,
             chunks,
+            volume_multiplier: 1.0,
+            reverse: false,
         })
+    }
+
+    fn riff_size(&self) -> u32 {
+        4 + self.chunks.iter().map(Chunk::total_size).sum::<u32>()
     }
 }

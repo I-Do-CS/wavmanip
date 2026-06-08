@@ -55,7 +55,10 @@ pub fn run(cli: Cli) -> Result<()> {
         .with_context(|| format!("failed to open {}", config.input_file.display()))?;
 
     let wav_file = wav::WavFile::from_reader(&mut file)?;
-    println!("{:?}", wav_file);
+
+    let mut outfile = File::create(config.output_file)?;
+
+    wav_file.to_writer(&mut outfile)?;
 
     // Apply transformations
 
