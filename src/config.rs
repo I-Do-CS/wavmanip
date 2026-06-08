@@ -46,6 +46,7 @@ impl TryFrom<Cli> for Config {
         })
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
