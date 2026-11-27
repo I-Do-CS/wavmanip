@@ -1,41 +1,20 @@
 # WavManip
 
-**A Rust command-line project for working with RIFF/WAV audio files.**
+A Rust command-line tool that reads a RIFF/WAVE file, parses its chunks and writes it back out. It handles the binary layout directly, from little-endian headers to the padding after odd-length chunks.
 
-`Rust 2024` · `Binary I/O` · `Clap` · `anyhow`
+## Try it
 
-WavManip is an independent systems-programming project that models the WAV binary format directly, including RIFF headers, chunk headers, format metadata and audio data.
-
-## Highlights
-
-- RIFF/WAVE signature validation and little-endian encoding and decoding.
-- Typed format, data and unknown chunks with word-alignment padding.
-- Generic Rust Read/Write interfaces, file-size limits and contextual errors.
-- Command-line argument validation, output-path derivation and unit tests.
-
-## Build and run
-
-Install a stable Rust toolchain supporting edition 2024.
+With a stable Rust toolchain that supports the 2024 edition, run from the repository root:
 
 ```bash
-git clone https://github.com/I-Do-CS/wavmanip.git
-cd wavmanip
-cargo build --release
-cargo test
-cargo run -- --help
-cargo run -- input.wav copied.wav
+cargo run --locked -- input.wav roundtrip.wav
+cargo test --locked
 ```
 
-Use a distinct output path. The current development version focuses on parsing and serialization; volume and reversal options are reserved for future sample processing.
+Use a separate output path for the rewritten file.
 
-## Source layout
+## Read the code
 
-| File | Responsibility |
-| --- | --- |
-| [cli.rs](src/cli.rs) | Command-line interface |
-| [config.rs](src/config.rs) | Configuration and output naming |
-| [wav.rs](src/wav.rs) | RIFF/WAV model, reader and writer |
-| [lib.rs](src/lib.rs) | File validation and orchestration |
-| [main.rs](src/main.rs) | Entry point |
-
-Independent project by [Ali Ghelichkhani](https://github.com/I-Do-CS).
+- [wav.rs](src/wav.rs) contains the format model. `WavFile::from_reader` and `WavFile::to_writer` work with Rust’s `Read` and `Write` traits. The model keeps unknown chunk payloads so it can write them back out.
+- [lib.rs](src/lib.rs) validates the input file and connects the parser and writer.
+- [cli.rs](src/cli.rs) and [config.rs](src/config.rs) handle arguments and output naming.
